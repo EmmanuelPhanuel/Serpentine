@@ -17,20 +17,44 @@ A modern arcade take on the classic Snake game. Built with **React + TypeScript 
 - **Auto-pause** when the tab is hidden or the window loses focus
 - **Sound effects** via a tiny WebAudio synth (no assets) — fully mutable
 
-## 🚀 Getting Started
+## 🚀 Running with Vite
+
+The project is a standard Vite app — everything below is just `npm` + `vite`, no extra setup.
+
+**Prerequisite:** [Node.js](https://nodejs.org) 18+ (20+ recommended).
 
 ```bash
-# Install dependencies
+# 1. Install all dependencies (Vite included — it's in devDependencies)
 npm install
 
-# Start the dev server
+# 2. Start the Vite dev server (hot-reload while you edit)
 npm run dev
+#    → open the printed URL, usually http://localhost:5173
 
-# Type-check
+# 3. Type-check (optional)
 npm run typecheck
 
-# Build for production
+# 4. Production build
 npm run build
+#    → outputs to dist/
+
+# 5. Serve the production build locally with Vite
+npm run preview
+```
+
+> The scripts are wired in `package.json`: `dev` → `vite`, `build` → `vite build`.
+> So `npx vite` / `npx vite build` work identically if you prefer calling Vite directly.
+
+### Starting from a blank Vite template instead?
+
+```bash
+npm create vite@latest serpentine -- --template react-ts
+cd serpentine
+# then: copy this project's index.html + src/ folder in, and run:
+npm install -D tailwindcss @tailwindcss/vite
+# add tailwindcss() to plugins in vite.config.ts, then:
+npm install
+npm run dev
 ```
 
 ## 🎮 How to Play
