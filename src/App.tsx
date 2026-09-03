@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import SnakeGame from "./game/SnakeGame";
 import { DIFFICULTIES, type Difficulty, type HudData } from "./game/engine";
 import { setMuted } from "./game/audio";
@@ -250,6 +251,7 @@ export default function App() {
           </p>
         </footer>
       </div>
+      <Analytics />
     </div>
   );
 }
