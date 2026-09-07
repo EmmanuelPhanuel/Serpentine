@@ -16,7 +16,7 @@ function ac(): AudioContext | null {
       if (!AC) return null;
       ctx = new AC();
     }
-    if (ctx.state === "suspended") void ctx.resume();
+    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
     return ctx;
   } catch {
     return null;
@@ -41,6 +41,7 @@ function tone(
   gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   osc.connect(gain).connect(c.destination);
+  osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
 }
@@ -67,6 +68,9 @@ export const sfx = {
   resume() {
     tone(330, 0.07, { type: "triangle", vol: 0.05 });
     tone(494, 0.1, { type: "triangle", vol: 0.05, delay: 0.07 });
+  },
+  level() {
+    [440, 554, 659].forEach((f, i) => tone(f, 0.13, { type: "triangle", vol: 0.045, delay: i * 0.08 }));
   },
   best() {
     [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.12, { type: "square", vol: 0.05, delay: i * 0.09 }));

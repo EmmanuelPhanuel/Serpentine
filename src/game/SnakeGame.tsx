@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { SnakeEngine, DIFFICULTIES, type Difficulty, type HudData, type Vec } from "./engine";
+import { SnakeEngine, type Difficulty, type HudData } from "./engine";
+import { LevelProgress } from "../components/WorldUI";
+import { worldForLevel, type SnakeColor } from "./worlds";
+import { renderGame } from "./renderer";
+import { handleGameKey, swipeDirection } from "./input";
 import { sfx } from "./audio";
 import { DPad, IconPause, IconPlay, IconRestart, IconCrown } from "../components/ui";
 
 interface Props {
   difficulty: Difficulty;
+  snakeColor: SnakeColor;
   best: number;
   onScore: (score: number) => void;
   onHud: (hud: HudData) => void;
@@ -14,29 +19,17 @@ const STATUS_META: Record<HudData["status"], { label: string; color: string; bg:
   ready: { label: "READY", color: "#ffc857", bg: "rgba(255,200,87,0.12)" },
   running: { label: "LIVE", color: "#a8ef4c", bg: "rgba(168,239,76,0.12)" },
   paused: { label: "PAUSED", color: "#ff6354", bg: "rgba(255,99,84,0.12)" },
+  won: { label: "COMPLETE", color: "#ffc857", bg: "rgba(255,200,87,0.12)" },
   over: { label: "WRECKED", color: "#ff6354", bg: "rgba(255,99,84,0.14)" },
-};
-
-const DIR_KEYS: Record<string, Vec> = {
-  ArrowUp: { x: 0, y: -1 },
-  ArrowDown: { x: 0, y: 1 },
-  ArrowLeft: { x: -1, y: 0 },
-  ArrowRight: { x: 1, y: 0 },
-  w: { x: 0, y: -1 },
-  s: { x: 0, y: 1 },
-  a: { x: -1, y: 0 },
-  d: { x: 1, y: 0 },
-  W: { x: 0, y: -1 },
-  S: { x: 0, y: 1 },
-  A: { x: -1, y: 0 },
-  D: { x: 1, y: 0 },
 };
 
 function Overlay({ children, onTap }: { children: ReactNode; onTap?: () => void }) {
   return (
     <div
-      className="pop-in absolute inset-0 z-20 flex flex-col items-center justify-center gap-3.5 bg-[rgba(5,15,9,0.84)] backdrop-blur-[2.5px] text-center px-5"
-      onPointerDown={onTap}
+      className="pop-in absolute inset-0 z-20 flex flex-col items-center justify-center gap-3.5 game-overlay backdrop-blur-[2.5px] text-center px-5"
+      onClick={(e) => {
+        if (!(e.target as Element).closest("button")) onTap?.();
+      }}
     >
       {children}
     </div>
@@ -51,9 +44,9 @@ const btnGhost =
   "btn-arcade font-display text-[10px] tracking-[0.18em] px-5 py-3 border border-pit-600 bg-pit-800/80 text-fern-200 " +
   "hover:border-moss-400 hover:text-leaf-200 flex items-center gap-2.5";
 
-export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
+export default function SnakeGame({ snakeColor, difficulty, best, onScore, onHud }: Props) {
   const engineRef = useRef<SnakeEngine | null>(null);
-  if (!engineRef.current) engineRef.current = new SnakeEngine(difficulty, best);
+  if (!engineRef.current) engineRef.current = new SnakeEngine(difficulty, snakeColor);
   const engine = engineRef.current;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -68,13 +61,9 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
   const onHudRef = useRef(onHud);
   onHudRef.current = onHud;
 
-  const [hud, setHud] = useState<HudData>({
-    status: "ready",
-    score: 0,
-    apples: 0,
-    length: 3,
-    tps: +(1000 / DIFFICULTIES[difficulty].interval).toFixed(1),
-  });
+  const [hud, setHud] = useState<HudData>(() => engine.getHud());
+  const [levelNotice, setLevelNotice] = useState<number | null>(null);
+  const resultRef = useRef<HTMLParagraphElement>(null);
 
   /* --- wire engine callbacks --- */
   useEffect(() => {
@@ -82,19 +71,42 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
       setHud(h);
       onHudRef.current(h);
     };
+    onHudRef.current(engine.getHud());
+    let levelTimer: number | undefined;
+    const clearLevelNotice = () => { window.clearTimeout(levelTimer); setLevelNotice(null); };
+    let bestTimer: number | undefined;
+    const clearBestTimer = () => { window.clearTimeout(bestTimer); bestTimer = undefined; };
     engine.onEvent = (ev) => {
       switch (ev) {
         case "eat":
           sfx.eat(engine.apples);
           onScoreRef.current(engine.score);
           break;
+        case "level":
+          window.clearTimeout(levelTimer);
+          setLevelNotice(engine.level);
+          sfx.level();
+          levelTimer = window.setTimeout(() => setLevelNotice(null), 2600);
+          break;
+        case "reset":
+          clearLevelNotice();
+          clearBestTimer();
+          break;
+        case "win":
+          clearLevelNotice();
+          clearBestTimer();
+          bestTimer = window.setTimeout(() => sfx.best(), 180);
+          break;
         case "die":
+          clearLevelNotice();
           sfx.die();
           if (engine.score > 0 && engine.score > bestAtStartRef.current) {
-            window.setTimeout(() => sfx.best(), 380);
+            clearBestTimer();
+            bestTimer = window.setTimeout(() => sfx.best(), 380);
           }
           break;
         case "start":
+          clearBestTimer();
           sfx.start();
           bestAtStartRef.current = bestRef.current;
           break;
@@ -107,21 +119,35 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
       }
     };
     return () => {
+      clearBestTimer();
+      window.clearTimeout(levelTimer);
       engine.onHud = undefined;
       engine.onEvent = undefined;
     };
   }, [engine]);
 
-  /* --- difficulty sync (skip first render) --- */
-  const mounted = useRef(false);
+  useEffect(() => { engine.snakeColor = snakeColor; }, [engine, snakeColor]);
+
   useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true;
-      return;
-    }
-    engine.setDifficulty(difficulty);
+    if (engine.difficulty !== difficulty) engine.setDifficulty(difficulty);
     bestAtStartRef.current = bestRef.current;
   }, [difficulty, engine]);
+
+  useEffect(() => {
+    if (hud.status === "paused" || hud.status === "over" || hud.status === "won") resultRef.current?.focus();
+    else if (hud.status === "running") wrapRef.current?.focus({ preventScroll: true });
+  }, [hud.status]);
+
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => {
+      engine.reducedMotion = preference.matches;
+      if (preference.matches) { engine.particles = []; engine.floaters = []; }
+    };
+    sync();
+    preference.addEventListener("change", sync);
+    return () => preference.removeEventListener("change", sync);
+  }, [engine]);
 
   /* --- render loop + canvas sizing --- */
   useEffect(() => {
@@ -153,7 +179,7 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
       if (s > 0) {
         const d = dpr();
         ctx.setTransform(d, 0, 0, d, 0, 0);
-        engine.render(ctx, s, now);
+        renderGame(engine, ctx, s, now);
       }
       raf = requestAnimationFrame(frame);
     };
@@ -166,24 +192,7 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
 
   /* --- keyboard --- */
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const dir = DIR_KEYS[e.key];
-      if (dir) {
-        e.preventDefault();
-        engine.steer(dir);
-        return;
-      }
-      if (e.key === " ") {
-        e.preventDefault();
-        engine.togglePause();
-      } else if (e.key === "Enter") {
-        if (engine.status === "ready" || engine.status === "over") engine.restart();
-      } else if (e.key === "p" || e.key === "P") {
-        engine.togglePause();
-      } else if (e.key === "r" || e.key === "R") {
-        engine.restart();
-      }
-    };
+    const onKey = (e: KeyboardEvent) => handleGameKey(e, engine);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [engine]);
@@ -204,16 +213,17 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
 
   /* --- swipe steering --- */
   const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) { touchRef.current = null; return; }
     const t = e.touches[0];
     touchRef.current = { x: t.clientX, y: t.clientY };
   };
   const onTouchMove = (e: React.TouchEvent) => {
-    if (!touchRef.current) return;
+    if (!touchRef.current || e.touches.length !== 1) { touchRef.current = null; return; }
     const t = e.touches[0];
     const dx = t.clientX - touchRef.current.x;
     const dy = t.clientY - touchRef.current.y;
-    if (Math.hypot(dx, dy) < 26) return;
-    const dir: Vec = Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
+    const dir = swipeDirection(dx, dy, sizeRef.current);
+    if (!dir) return;
     engine.steer(dir);
     touchRef.current = { x: t.clientX, y: t.clientY };
   };
@@ -222,15 +232,22 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
   };
 
   const meta = STATUS_META[hud.status];
-  const isNewBest = hud.status === "over" && hud.score > 0 && hud.score > bestAtStartRef.current;
+  const isNewBest = (hud.status === "over" || hud.status === "won") && hud.score > 0 && hud.score > bestAtStartRef.current;
   const chip =
     "btn-arcade flex items-center justify-center gap-2 h-11 px-4 border border-pit-600 bg-pit-800/90 text-fern-200 " +
     "hover:border-moss-400 hover:text-leaf-200 font-display text-[9px] tracking-[0.16em]";
 
   return (
     <div className="min-w-0">
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {hud.status === "won" ? `Board completed. Final score ${hud.score}.` : hud.status === "over" ? `Game over. Final score ${hud.score}.` : hud.status === "paused" ? "Game paused." : hud.status === "running" ? "Game running." : "Ready to play."}
+      </p>
+      <LevelProgress level={hud.level} score={hud.score} length={hud.length} />
+      <div className="level-notice" role="status" aria-live="polite" aria-atomic="true">
+        {levelNotice ? <span key={levelNotice} className="level-arrival">{worldForLevel(levelNotice).symbol} LEVEL {levelNotice} · {worldForLevel(levelNotice).name}</span> : <span className="text-fern-300">{worldForLevel(hud.level).description}</span>}
+      </div>
       {/* mobile scoreboard strip */}
-      <div className="lg:hidden mb-3 grid grid-cols-[1fr_1fr_auto] gap-1.5">
+      <div className="xl:hidden mb-3 grid grid-cols-[1fr_1fr_auto] gap-1.5">
         <div className="border border-pit-600 bg-pit-850/80 px-3 py-1.5">
           <p className="text-[9px] font-semibold tracking-[0.18em] text-fern-300">SCORE</p>
           <p key={hud.score} className="font-display text-lg leading-tight text-leaf-300 score-bump">
@@ -256,10 +273,14 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
       {/* board */}
       <div
         ref={wrapRef}
-        className="relative w-full aspect-square max-w-[600px] mx-auto touch-none no-select rounded-[16px] shadow-[0_28px_80px_-28px_rgba(0,0,0,0.9),0_0_70px_-24px_rgba(168,239,76,0.3)]"
+        tabIndex={0}
+        role="group"
+        aria-label="Snake game. Arrow keys or WASD to steer; Space to pause."
+        className="game-board relative w-full aspect-square max-w-[600px] mx-auto touch-none no-select rounded-[16px] shadow-[0_28px_80px_-28px_rgba(0,0,0,0.9),0_0_70px_-24px_rgba(168,239,76,0.3)]"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-[16px]" aria-label="Snake game board" />
         <div className="scanlines absolute inset-0 rounded-[16px] pointer-events-none" />
@@ -303,9 +324,8 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
             </p>
             <button
               className={btnPrimary}
-              onClick={(e) => {
+              onClick={() => {
                 engine.start();
-                e.currentTarget.blur();
               }}
             >
               <IconPlay className="w-3.5 h-3.5" /> START RUN
@@ -318,23 +338,21 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
 
         {hud.status === "paused" && (
           <Overlay>
-            <p className="font-display text-2xl tracking-[0.2em] text-amber-glow">PAUSED</p>
-            <p className="text-xs text-fern-300">The garden waits. Score is safe: {hud.score}</p>
-            <div className="flex items-center gap-2.5 mt-1">
+            <p ref={resultRef} tabIndex={-1} className="font-display text-2xl tracking-[0.2em] text-amber-glow">PAUSED</p>
+            <p className="text-xs text-fern-300">Take a breath. Score is safe: {hud.score}</p>
+            <div className="flex flex-wrap justify-center items-center gap-2.5 mt-1">
               <button
                 className={btnPrimary}
-                onClick={(e) => {
+                onClick={() => {
                   engine.resume();
-                  e.currentTarget.blur();
                 }}
               >
                 <IconPlay className="w-3.5 h-3.5" /> RESUME
               </button>
               <button
                 className={btnGhost}
-                onClick={(e) => {
+                onClick={() => {
                   engine.restart();
-                  e.currentTarget.blur();
                 }}
               >
                 <IconRestart className="w-3.5 h-3.5" /> RESTART
@@ -344,15 +362,15 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
           </Overlay>
         )}
 
-        {hud.status === "over" && (
+        {(hud.status === "over" || hud.status === "won") && (
           <Overlay onTap={() => engine.start()}>
             {isNewBest && (
               <span className="badge-flash font-display text-[9px] tracking-[0.24em] text-amber-glow border border-amber-glow/60 bg-amber-glow/10 px-3 py-1.5">
                 ★ NEW BEST ★
               </span>
             )}
-            <p className="font-display text-[26px] sm:text-3xl text-berry-400" style={{ textShadow: "0 0 26px rgba(255,99,84,0.45)" }}>
-              GAME OVER
+            <p ref={resultRef} tabIndex={-1} className="font-display text-[26px] sm:text-3xl text-berry-400" style={{ textShadow: "0 0 26px rgba(255,99,84,0.45)" }}>
+              {hud.status === "won" ? "YOU WIN!" : "GAME OVER"}
             </p>
             <div className="flex items-center gap-8">
               <div>
@@ -366,13 +384,12 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
               </div>
             </div>
             <p className="text-[11px] text-fern-300">
-              {hud.apples} apple{hud.apples === 1 ? "" : "s"} · length {hud.length} · {DIFFICULTIES[difficulty].tag}
+              Level {hud.level} · {worldForLevel(hud.level).name} · {hud.apples} apples
             </p>
             <button
               className={btnPrimary}
-              onClick={(e) => {
+              onClick={() => {
                 engine.restart();
-                e.currentTarget.blur();
               }}
             >
               <IconRestart className="w-3.5 h-3.5" /> RUN IT BACK
@@ -383,8 +400,8 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
       </div>
 
       {/* control deck */}
-      <div className="mt-4 flex items-center justify-between gap-4 max-w-[600px] mx-auto">
-        <div className="lg:hidden">
+      <div className="game-control-deck mt-4 max-w-[600px] mx-auto">
+        <div className="touch-pad">
           <DPad
             onDir={(d) => engine.steer(d)}
             onCenter={() => engine.togglePause()}
@@ -393,12 +410,11 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
           />
         </div>
 
-        <div className="flex items-center gap-2 lg:ml-auto">
+        <div className="flex flex-wrap justify-center items-center gap-2">
           <button
             className={chip}
-            onClick={(e) => {
+            onClick={() => {
               engine.togglePause();
-              e.currentTarget.blur();
             }}
             aria-label={hud.status === "running" ? "Pause game" : "Start or resume game"}
           >
@@ -407,9 +423,8 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
           </button>
           <button
             className={chip}
-            onClick={(e) => {
+            onClick={() => {
               engine.restart();
-              e.currentTarget.blur();
             }}
             aria-label="Restart game"
           >
@@ -418,7 +433,7 @@ export default function SnakeGame({ difficulty, best, onScore, onHud }: Props) {
         </div>
       </div>
 
-      <p className="hidden lg:block text-center text-[11px] text-fern-300/70 mt-3 tracking-wide">
+      <p className="hidden xl:block text-center text-[11px] text-fern-300/70 mt-3 tracking-wide">
         <kbd className="kbd">SPACE</kbd> pause · <kbd className="kbd">R</kbd> restart ·{" "}
         <kbd className="kbd">M</kbd> mute — speed ramps up with every apple
       </p>

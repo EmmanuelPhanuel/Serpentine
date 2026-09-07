@@ -150,44 +150,48 @@ export function DifficultyPanel({
 
   if (compact) {
     return (
-      <div className="grid grid-cols-3 gap-1.5">
-        {diffs.map(([key, cfg]) => {
-          const active = key === value;
-          return (
-            <button
-              key={key}
-              onClick={(e) => {
-                onChange(key);
-                e.currentTarget.blur();
-              }}
-              className={`btn-arcade font-display text-[10px] tracking-wider px-2 py-2.5 border ${
-                active
-                  ? "bg-leaf-300 text-pit-900 border-leaf-300 shadow-[0_3px_0_#3d6b2a]"
-                  : "bg-pit-850 text-fern-300 border-pit-600 hover:border-moss-400 hover:text-leaf-200"
-              }`}
-            >
-              {cfg.tag}
-              <span className={`block text-[8px] mt-1 ${active ? "text-pit-700" : "text-fern-300/60"}`}>
-                ★ {bests[key] || 0}
-              </span>
-            </button>
-          );
-        })}
+      <div>
+        <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Difficulty">
+          {diffs.map(([key, cfg]) => {
+            const active = key === value;
+            return (
+              <button
+                key={key}
+                aria-pressed={active}
+                disabled={disabled}
+                onClick={() => {
+                  onChange(key);
+                }}
+                className={`btn-arcade font-display text-[10px] tracking-wider px-2 py-2.5 border ${
+                  active
+                    ? "bg-leaf-300 text-pit-900 border-leaf-300 shadow-[0_3px_0_#3d6b2a]"
+                    : "bg-pit-850 text-fern-300 border-pit-600 hover:border-moss-400 hover:text-leaf-200"
+                }`}
+              >
+                {cfg.tag}
+                <span className={`block text-[8px] mt-1 ${active ? "text-pit-700" : "text-fern-300/60"}`}>
+                  ★ {bests[key] || 0}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-fern-300 mt-2">Switching pace resets the run.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" role="group" aria-label="Difficulty">
       {diffs.map(([key, cfg]) => {
         const active = key === value;
         return (
           <button
             key={key}
+            aria-pressed={active}
             disabled={disabled}
-            onClick={(e) => {
+            onClick={() => {
               onChange(key);
-              e.currentTarget.blur();
             }}
             className={`btn-arcade w-full text-left px-3.5 py-3 border group relative overflow-hidden ${
               active
@@ -276,10 +280,10 @@ export function DPad({
     "btn-arcade flex items-center justify-center w-14 h-14 border border-pit-600 bg-pit-800/90 text-leaf-200 " +
     "active:bg-pit-700 active:text-leaf-300 shadow-[0_3px_0_rgba(0,0,0,0.45)] touch-none no-select";
 
-  const press = (d: { x: number; y: number }) => (e: React.PointerEvent) => {
-    e.preventDefault();
-    onDir(d);
-  };
+  const activate = (action: () => void) => ({
+    onPointerDown: (e: React.PointerEvent) => { if (e.button === 0) { e.preventDefault(); action(); } },
+    onClick: (e?: React.MouseEvent) => { if (!e || e.detail === 0) action(); },
+  });
 
   return (
     <div
@@ -289,28 +293,25 @@ export function DPad({
       aria-label="Touch controls"
     >
       <span />
-      <button className={btn} onPointerDown={press({ x: 0, y: -1 })} aria-label="Move up">
+      <button className={btn} {...activate(() => onDir({ x: 0, y: -1 }))} aria-label="Move up">
         <Chevron />
       </button>
       <span />
-      <button className={btn} onPointerDown={press({ x: -1, y: 0 })} aria-label="Move left">
+      <button className={btn} {...activate(() => onDir({ x: -1, y: 0 }))} aria-label="Move left">
         <Chevron className="w-6 h-6 -rotate-90" />
       </button>
       <button
         className={`${btn} !bg-pit-700 !text-amber-glow !border-amber-glow/40`}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          onCenter();
-        }}
+        {...activate(onCenter)}
         aria-label={centerLabel}
       >
         {centerIcon}
       </button>
-      <button className={btn} onPointerDown={press({ x: 1, y: 0 })} aria-label="Move right">
+      <button className={btn} {...activate(() => onDir({ x: 1, y: 0 }))} aria-label="Move right">
         <Chevron className="w-6 h-6 rotate-90" />
       </button>
       <span />
-      <button className={btn} onPointerDown={press({ x: 0, y: 1 })} aria-label="Move down">
+      <button className={btn} {...activate(() => onDir({ x: 0, y: 1 }))} aria-label="Move down">
         <Chevron className="w-6 h-6 rotate-180" />
       </button>
       <span />
